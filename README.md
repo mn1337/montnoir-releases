@@ -32,6 +32,20 @@ montnoir status --json
 
 Windows setup may require elevation, a WSL/Docker Desktop first launch, and a reboot. Repeat the installer after completing the requested system step. Windows ARM64 binaries are cross-built; refer to the release notes for native platform validation.
 
+## Update an existing installation
+
+Download and run the latest installer above using the same OS account. Existing registration, image pins and saved environments are preserved. Starting the runner alone keeps its current image version.
+
+Before applying the new release, close new task assignments, wait for running work to finish, run `montnoir stop`, and back up the private state directory and the entire named state volume while stopped. Then run:
+
+```sh
+montnoir upgrade
+montnoir start
+montnoir status --json
+```
+
+For a public fleet host, use `montnoir-fleet` instead. No new login is needed. `upgrade` requires a stopped controller and selects the immutable image digests bundled with the installed CLI. Saved environments keep their original files, images and resource limits. See `docs/OPERATIONS.md` in the archive for backup and recovery details.
+
 ## Resources and operation
 
 For one small workload, allow approximately 4 vCPU, 4 GiB RAM and 64 GiB disk for the Linux backend. Heavy analyzers require more memory. The normal private session disk reserves 32 GiB; `--compact` / `-Compact` uses 28 GiB and smaller session limits. These are part of the total host disk requirement. Existing settings and sessions are preserved.
