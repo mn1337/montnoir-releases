@@ -17,8 +17,6 @@ montnoir status --json
 
 The installer selects AMD64 or ARM64, checks the archive against its embedded SHA-256, and installs the application and Docker backend. Enter the connect code from MontNoir when `login` requests it. `online` / `ready` confirms the connection. Use the same OS account for installation and subsequent commands.
 
-Linux cloud fleet installations use `bash montnoir-install.sh public`, followed by `montnoir-fleet login --credential-file /path/to/issued-credential.json`.
-
 ## Windows
 
 Run in PowerShell:
@@ -44,7 +42,7 @@ montnoir start
 montnoir status --json
 ```
 
-For a public fleet host, use `montnoir-fleet` instead. No new login is needed. `upgrade` requires a stopped controller and selects the immutable image digests bundled with the installed CLI. Saved environments keep their original files, images and resource limits. See `docs/OPERATIONS.md` in the archive for backup and recovery details.
+No new login is needed. `upgrade` requires a stopped controller and selects the immutable image digests bundled with the installed CLI. Saved environments keep their original files, images and resource limits. See `docs/OPERATIONS.md` in the archive for backup and recovery details.
 
 ## Resources and operation
 
