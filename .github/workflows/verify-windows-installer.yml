@@ -1,0 +1,101 @@
+name: Verify Windows installer
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Personal runner version to verify (vX.Y.Z)
+        required: true
+        type: string
+      release_tag:
+        description: Release or temporary draft tag containing the archive
+        required: true
+        type: string
+      sha256:
+        description: Archive SHA-256 from the independently verified signed manifest
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    # Reading a draft release requires push access. The token is exposed only
+    # to the download step, not to the installer verification process.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Download and verify the exact personal archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          EXPECTED_SHA256: ${{ inputs.sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RELEASE_VERSION -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Invalid version' }
+          if ($env:RELEASE_TAG -cnotmatch '^(installer-check-)?v[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Invalid release tag' }
+          if ($env:EXPECTED_SHA256 -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid SHA-256' }
+          $Archive = 'montnoir_' + $env:RELEASE_VERSION + '_windows_amd64.zip'
+          gh release download $env:RELEASE_TAG --repo $env:RELEASE_REPOSITORY --pattern $Archive --dir .
+          if ($LASTEXITCODE -ne 0) { throw 'Download failed' }
+          if ((Get-FileHash $Archive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:EXPECTED_SHA256) { throw 'Archive hash mismatch' }
+          Expand-Archive -LiteralPath $Archive -DestinationPath package
+          'Verified archive SHA-256: ' + $env:EXPECTED_SHA256 | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Verify native PowerShell and startup registration without installing Docker
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Installer = (Resolve-Path 'package/install.ps1').ProviderPath
+          $Tokens = $null; $Errors = $null
+          [Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$Tokens, [ref]$Errors) | Out-Null
+          if ($Errors.Count) { throw ($Errors | Out-String) }
+          . $Installer -Plain
+          Initialize-SetupUI
+          function Assert-Check($Condition, [string]$Message) { if (!$Condition) { throw $Message } }
+          $Fixture = Join-Path $env:RUNNER_TEMP ('desktop-test-' + [guid]::NewGuid().ToString('N'))
+          $RegistryFixture = 'HKCU:\Software\MontNoirInstallerTests-' + [guid]::NewGuid().ToString('N')
+          try {
+              $First = Join-Path $Fixture 'Per user install'
+              $Second = Join-Path $Fixture 'Custom install'
+              New-Item -ItemType Directory -Path $First, $Second | Out-Null
+              $Desktop = Join-Path $First 'Docker Desktop.exe'
+              $Updated = Join-Path $Second 'Docker Desktop.exe'
+              [IO.File]::WriteAllText($Desktop, 'fixture only; never executed')
+              Assert-Check ((Find-DockerDesktop -InstallRoots @((Join-Path $Fixture 'missing'), $First)) -ceq $Desktop) 'Desktop path discovery failed'
+              Assert-Check ($null -eq (Find-DockerDesktop -InstallRoots @((Join-Path $Fixture 'missing')))) 'Missing Desktop accepted'
+              New-Item -Path $RegistryFixture | Out-Null
+              New-ItemProperty -LiteralPath $RegistryFixture -Name OtherApplication -Value 'preserve me' -PropertyType String | Out-Null
+              Enable-DockerDesktopAutostart $Desktop -RunKey $RegistryFixture
+              Enable-DockerDesktopAutostart $Desktop -RunKey $RegistryFixture
+              Assert-Check ((Get-ItemPropertyValue -LiteralPath $RegistryFixture -Name 'MontNoir Docker Desktop') -ceq ('"' + $Desktop + '"')) 'Startup path quoting failed'
+              Assert-Check ((Get-Item -LiteralPath $RegistryFixture).ValueCount -eq 2) 'Duplicate startup entries'
+              Assert-Check ((Get-ItemPropertyValue -LiteralPath $RegistryFixture -Name OtherApplication) -ceq 'preserve me') 'Unrelated entry changed'
+              Move-Item -LiteralPath $Desktop -Destination $Updated
+              Enable-DockerDesktopAutostart $Updated -RunKey $RegistryFixture
+              $Saved = Get-ItemPropertyValue -LiteralPath $RegistryFixture -Name 'MontNoir Docker Desktop'
+              Assert-Check ($Saved -ceq ('"' + $Updated + '"')) 'Moved install was not updated'
+              $Failed = $false
+              try { Enable-DockerDesktopAutostart $Desktop -RunKey $RegistryFixture } catch { $Failed = $true }
+              Assert-Check $Failed 'Missing executable accepted'
+              Assert-Check ((Get-ItemPropertyValue -LiteralPath $RegistryFixture -Name 'MontNoir Docker Desktop') -ceq $Saved) 'Failure changed the valid entry'
+              $Failed = $false
+              try { Enable-DockerDesktopAutostart $Updated -RunKey 'MissingProvider:\Run' } catch { $Failed = $true }
+              Assert-Check $Failed 'Registry error accepted as success'
+              $script:Preview = $true
+              foreach ($Scenario in @('success', 'error', 'action')) {
+                  $script:PreviewScenario = $Scenario
+                  $Output = @(Invoke-MontNoirInstaller 6>&1)
+                  Assert-Check ($Output[-1] -eq 0) 'Preview failed'
+              }
+              & .\package\montnoir.exe version
+              if ($LASTEXITCODE -ne 0) { throw 'Native CLI failed' }
+              'PASS: native Windows PowerShell 5.1 parser, executable, discovery, startup registry, repeat/update, preservation, error handling, and previews.' | Add-Content $env:GITHUB_STEP_SUMMARY
+          } finally {
+              if (Test-Path -LiteralPath $RegistryFixture) { Remove-Item -LiteralPath $RegistryFixture -Recurse -Force }
+              if (Test-Path -LiteralPath $Fixture) { Remove-Item -LiteralPath $Fixture -Recurse -Force }
+          }
+          $global:LASTEXITCODE = 0
