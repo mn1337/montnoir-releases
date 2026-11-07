@@ -30,6 +30,11 @@ montnoir status --json
 
 Windows setup may require elevation, a WSL/Docker Desktop first launch, and a reboot. Repeat the installer after completing the requested system step. Windows ARM64 binaries are cross-built; refer to the release notes for native platform validation.
 
+The installer automatically configures the Docker backend to start: at system
+startup on systemd Linux, and at user sign-in on macOS/Windows. Docker Desktop
+users do not need to enable a setting manually. After the first successful
+`montnoir login`, the runner restarts with Docker unless explicitly stopped.
+
 ## Update an existing installation
 
 Download and run the latest installer above using the same OS account. Existing registration, image pins and saved environments are preserved. Starting the runner alone keeps its current image version.
